@@ -26,7 +26,7 @@ for iter = 1:max_iter
         S = S(:,ind);
     end
     P_S = eye(p) - ( (A*S) \ (A*S) );
-    grad = 2 * Sigma * x;
+    grad = Sigma * x;
     t = (P_S' * S' * Sigma * S * P_S + reg * eye(p)) \ (P_S' * S' * grad);
     x = x - S * P_S * t;
 
