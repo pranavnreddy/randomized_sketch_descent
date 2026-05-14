@@ -9,3 +9,4 @@ __pycache__/
 
 # Generated figures
 figures/
+.DS_Store
