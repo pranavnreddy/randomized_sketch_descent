@@ -1,1 +1,12 @@
-compute_huber.m
+# MATLAB scratch file (not tracked)
+matlab/compute_huber.m
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+
+# Generated figures
+figures/
+.DS_Store
