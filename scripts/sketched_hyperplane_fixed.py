@@ -39,6 +39,8 @@ import os
 import numpy as np
 import cvxpy as cvx
 import matplotlib
+import math
+import time
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -96,27 +98,92 @@ def randomized_sketch_descent(Sigma, A, b, max_iter, reg, seed=0):
     return costs, feas
 
 
+def randomized_sketch_descent_indirect_solve(Sigma, A, b, max_iter, reg, indirect_solve_PS, seed=0):
+    """Feasibility-preserving sketched solver (the fix).
+
+    Returns per-iteration cost and feasibility ||A x - b|| histories.
+    """
+    n, m = A.shape[1], A.shape[0]
+    rng = np.random.default_rng(seed)
+
+    x = feasible_start(A, b)
+    costs = np.zeros((max_iter, 1))
+    feas = np.zeros((max_iter, 1))
+
+    for k in range(max_iter):
+        # Sketch dimension p must exceed m, else null(A S) is trivial.
+        p = int(rng.integers(m + 1, n + 1))
+        S = rng.standard_normal((n, p))
+
+        AS = A @ S
+
+        if(indirect_solve_PS):
+            P_S = np.zeros(p)
+            for _ in range(math.ceil( 2 * math.log(k+1))):
+                ind = int(rng.integers(0, m))
+                ASi = AS[ind,:]
+
+                P_S = P_S + (descent_dir[ind] - ASi @ P_S) / np.linalg.norm(ASi)**2 * ASi
+            P_S = np.eye(p) - P_S
+        else:
+            P_S = np.eye(p) - np.linalg.pinv(AS) @ AS  # projector onto null(A S)
+        SP = S @ P_S
+
+        grad = Sigma @ x
+        M = SP.T @ Sigma @ SP + reg * np.eye(p)
+
+        t = np.zeros(shape=(p,))
+        descent_dir = SP.T @ grad
+        
+        for _ in range(math.ceil( 2 * math.log(k+1))):
+            ind = int(rng.integers(0, p-1))
+            Mi = M[ind,:]
+
+            t = t + (descent_dir[ind] - Mi @ t) / np.linalg.norm(Mi)**2 * Mi
+        # t = np.linalg.solve(M, SP.T @ grad)
+        d = SP @ t
+        d = np.reshape(d, (n,-1))
+        x = x - d  # A (SP t) = 0  =>  x stays feasible
+
+        costs[k] = x.T @ Sigma @ x / 2
+        feas[k] = np.linalg.norm(A @ x - b)
+    return costs, feas
+
+
 def main():
     A, Sigma, b = make_problem()
     max_iter = 400
     rho = 1.0
     reg = 1e-2
+    indirect_solve_PS = True
 
     opt_cost = reference_solution(A, Sigma, b)
     print(f"cvxpy optimal cost = {opt_cost:.8g}\n")
 
+    start = time.time()
     un_costs, un_feas, _ = unsketched_admm(Sigma, A, b, max_iter, rho)
-    br_costs, br_feas, _ = sketched_admm(Sigma, A, b, max_iter, rho)
+    end = time.time()
+    un_time = end - start
+    # br_costs, br_feas, _ = sketched_admm(Sigma, A, b, max_iter, rho)
+    start = time.time()
     rsd_costs, rsd_feas = randomized_sketch_descent(Sigma, A, b, max_iter, reg)
+    end = time.time()
+    rsd_time = end - start
 
-    def report(name, costs, feas):
+    start = time.time()
+    rsdi_costs, rsdi_feas = randomized_sketch_descent_indirect_solve(Sigma, A, b, max_iter, reg, indirect_solve_PS)
+    end = time.time()
+    rsdi_time = end - start
+
+    def report(name, costs, feas, time):
         nsub = (costs[-1, 0] - opt_cost) / opt_cost
         print(f"{name:<26} final cost = {costs[-1, 0]:.8g}  "
-              f"norm. subopt = {nsub:.3g}  feas = {feas[-1, 0]:.3g}")
+              f"norm. subopt = {nsub:.3g}  feas = {feas[-1, 0]:.3g}  time = {time:.3f}")
 
-    report("unsketched ADMM", un_costs, un_feas)
-    report("sketched ADMM (broken)", br_costs, br_feas)
-    report("sketched descent (RSD, fix)", rsd_costs, rsd_feas)
+    report("unsketched ADMM", un_costs, un_feas, un_time)
+    # report("sketched ADMM (broken)", br_costs, br_feas)
+    report("sketched descent (RSD, direct solve)", rsd_costs, rsd_feas, rsd_time)
+    report("sketched descent (RSD, indirect solve)", rsdi_costs, rsdi_feas, rsdi_time)
 
     # ----------------------------------------------------------------
     # Plots: normalized suboptimality (-> 0) and feasibility.
@@ -125,9 +192,9 @@ def main():
     it = np.arange(max_iter)
 
     series = [
-        ("unsketched admm", un_costs, un_feas),
-        ("sketched admm (broken)", br_costs, br_feas),
-        ("sketched descent (fixed)", rsd_costs, rsd_feas),
+        (f"unsketched admm  {un_time:.3g}s", un_costs, un_feas),
+        (f"sketched descent (RSD, direct solve {rsd_time:.3g}s)", rsd_costs, rsd_feas),
+        (f"sketched descent (RSD, indirect solve {rsdi_time:.3g}s)", rsdi_costs, rsdi_feas)
     ]
 
     fig, ax = plt.subplots()
@@ -140,7 +207,7 @@ def main():
     ax.set_title("Normalized suboptimality")
     ax.legend()
     ax.grid(True, alpha=0.3)
-    fig.savefig("figures/fixed_suboptimality.pdf", bbox_inches="tight")
+    fig.savefig("figures/suboptimality_log_indirect_both.pdf", bbox_inches="tight")
     plt.close(fig)
 
     fig, ax = plt.subplots()
@@ -151,10 +218,10 @@ def main():
     ax.set_title("Feasibility")
     ax.legend()
     ax.grid(True, alpha=0.3)
-    fig.savefig("figures/fixed_feasibility.pdf", bbox_inches="tight")
+    fig.savefig("figures/feasibility_log_indirect_both.pdf", bbox_inches="tight")
     plt.close(fig)
 
-    print("\nwrote figures/fixed_suboptimality.pdf, figures/fixed_feasibility.pdf")
+    print("\nwrote figures/suboptimality_log_indirect.pdf, figures/feasibility_log_indirect.pdf")
 
 
 if __name__ == "__main__":
