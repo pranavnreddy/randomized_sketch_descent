@@ -18,10 +18,15 @@ def main():
     b = rng.standard_normal(size=(m, 1))
     eps = 1e-6
 
-    num_trials = 100
+    # The reduced (A A^T) systems converge for Kaczmarz/RCD in a few thousand
+    # iterations. The full (n+m)-dimensional KKT system is far more
+    # ill-conditioned (scaled condition number ||M||_F^2 / sigma_min^2 ~ 2e5),
+    # so it needs ~millions of iterations -- hence a separate, much larger
+    # budget. Because each KKT solve is expensive at that budget, num_trials is
+    # kept small.
+    kkt_max_iter = 3_000_000
 
-    big_mat = np.block([[np.eye(n), -A.T], [A, np.zeros((m, m))]])
-    # sol = np.linalg.solve(big_mat, np.block([[x0], [b]]))
+    num_trials = 3
 
     proj_time = proj_kkt_time = rcd_time = kacz_time = rcd_kkt_time = kacz_kkt_time = 0
     rcd_err = kacz_err = rcd_kkt_err = kacz_kkt_err = 0
@@ -30,6 +35,10 @@ def main():
         A = rng.standard_normal(size=(m, n))
         x0 = rng.standard_normal(size=(n, 1))
         b = rng.standard_normal(size=(m, 1))
+        # Rebuild the KKT matrix for *this* trial's A (it was previously built
+        # once outside the loop from a stale A, so the KKT-based solves were
+        # comparing against a projection from a different problem).
+        big_mat = np.block([[np.eye(n), -A.T], [A, np.zeros((m, m))]])
         start = time.time()
         proj_lam = np.linalg.solve(A @ A.T, b - A @ x0)
         proj_x = x0 + A.T @ proj_lam
@@ -58,14 +67,14 @@ def main():
         kacz_err += np.linalg.norm(proj_y - kacz_y) / np.linalg.norm(proj_y)
 
         start = time.time()
-        rcd_kkt_sol = randomized_coordinate_descent(big_mat, np.block([[x0], [b]]), tol=eps)
+        rcd_kkt_sol = randomized_coordinate_descent(big_mat, np.block([[x0], [b]]), tol=eps, max_iter=kkt_max_iter)
         rcd_kkt_y = rcd_kkt_sol[0:n]
         end = time.time()
         rcd_kkt_time += end - start
         rcd_kkt_err += np.linalg.norm(np.squeeze(proj_y) - rcd_kkt_y) / np.linalg.norm(proj_y)
 
         start = time.time()
-        kacz_kkt_sol = randomized_kaczmarz(big_mat, np.block([[x0], [b]]), tol=eps)
+        kacz_kkt_sol = randomized_kaczmarz(big_mat, np.block([[x0], [b]]), tol=eps, max_iter=kkt_max_iter)
         kacz_kkt_y = kacz_kkt_sol[0:n]
         end = time.time()
         kacz_kkt_time += end - start
