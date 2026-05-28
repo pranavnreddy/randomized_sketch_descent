@@ -129,11 +129,14 @@ def randomized_coordinate_descent(A, b, tol=1e-8, max_iter=10000, seed=0):
 
     m, n = A.shape
 
+    # Accept either a 1-D (m,) or column (m, 1) right-hand side.
+    b = np.asarray(b, dtype=float).reshape(-1)
+
     # Initialize
     x = np.zeros(n)
 
     # Residual r = Ax - b
-    r = -b
+    r = -b.copy()
 
     # Squared column norms
     col_norm_sq = np.sum(A * A, axis=0)
@@ -156,7 +159,7 @@ def randomized_coordinate_descent(A, b, tol=1e-8, max_iter=10000, seed=0):
         x[j] += delta
 
         # Efficient residual update
-        r += delta * a_j[:, np.newaxis]
+        r += delta * a_j
 
         # Convergence test every so often
         if k % n == 0:

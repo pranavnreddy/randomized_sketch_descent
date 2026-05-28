@@ -20,9 +20,6 @@ def main():
 
     num_trials = 100
 
-    big_mat = np.block([[np.eye(n), -A.T], [A, np.zeros((m, m))]])
-    # sol = np.linalg.solve(big_mat, np.block([[x0], [b]]))
-
     proj_time = proj_kkt_time = rcd_time = kacz_time = rcd_kkt_time = kacz_kkt_time = 0
     rcd_err = kacz_err = rcd_kkt_err = kacz_kkt_err = 0
 
@@ -30,6 +27,10 @@ def main():
         A = rng.standard_normal(size=(m, n))
         x0 = rng.standard_normal(size=(n, 1))
         b = rng.standard_normal(size=(m, 1))
+        # Rebuild the KKT matrix for *this* trial's A (it was previously built
+        # once outside the loop from a stale A, so the KKT-based solves were
+        # comparing against a projection from a different problem).
+        big_mat = np.block([[np.eye(n), -A.T], [A, np.zeros((m, m))]])
         start = time.time()
         proj_lam = np.linalg.solve(A @ A.T, b - A @ x0)
         proj_x = x0 + A.T @ proj_lam
