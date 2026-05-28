@@ -34,23 +34,9 @@ and writes normalized-suboptimality / feasibility plots (PDF) to figures/.
 
 from __future__ import annotations
 
-import os
-
 import numpy as np
 import cvxpy as cvx
-import matplotlib
 import math
-import time
-
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
-
-from sketched_hyperplane import (
-    make_problem,
-    unsketched_admm,
-    sketched_admm,
-)
-
 
 def reference_solution(A, Sigma, b):
     """Optimal cost via CVXPY."""
@@ -98,7 +84,7 @@ def randomized_sketch_descent(Sigma, A, b, max_iter, reg, seed=0):
     return costs, feas
 
 
-def randomized_sketch_descent_indirect_solve(Sigma, A, b, max_iter, reg, indirect_solve_PS, seed=0):
+def randomized_sketch_descent_indirect_solve(Sigma, A, b, max_iter, reg, seed=0):
     """Feasibility-preserving sketched solver (the fix).
 
     Returns per-iteration cost and feasibility ||A x - b|| histories.
@@ -117,16 +103,7 @@ def randomized_sketch_descent_indirect_solve(Sigma, A, b, max_iter, reg, indirec
 
         AS = A @ S
 
-        if(indirect_solve_PS):
-            P_S = np.zeros(p)
-            for _ in range(math.ceil( 2 * math.log(k+1))):
-                ind = int(rng.integers(0, m))
-                ASi = AS[ind,:]
-
-                P_S = P_S + (descent_dir[ind] - ASi @ P_S) / np.linalg.norm(ASi)**2 * ASi
-            P_S = np.eye(p) - P_S
-        else:
-            P_S = np.eye(p) - np.linalg.pinv(AS) @ AS  # projector onto null(A S)
+        P_S = np.eye(p) - np.linalg.pinv(AS) @ AS  # projector onto null(A S)
         SP = S @ P_S
 
         grad = Sigma @ x
@@ -148,81 +125,3 @@ def randomized_sketch_descent_indirect_solve(Sigma, A, b, max_iter, reg, indirec
         costs[k] = x.T @ Sigma @ x / 2
         feas[k] = np.linalg.norm(A @ x - b)
     return costs, feas
-
-
-def main():
-    A, Sigma, b = make_problem()
-    max_iter = 400
-    rho = 1.0
-    reg = 1e-2
-    indirect_solve_PS = True
-
-    opt_cost = reference_solution(A, Sigma, b)
-    print(f"cvxpy optimal cost = {opt_cost:.8g}\n")
-
-    start = time.time()
-    un_costs, un_feas, _ = unsketched_admm(Sigma, A, b, max_iter, rho)
-    end = time.time()
-    un_time = end - start
-    # br_costs, br_feas, _ = sketched_admm(Sigma, A, b, max_iter, rho)
-    start = time.time()
-    rsd_costs, rsd_feas = randomized_sketch_descent(Sigma, A, b, max_iter, reg)
-    end = time.time()
-    rsd_time = end - start
-
-    start = time.time()
-    rsdi_costs, rsdi_feas = randomized_sketch_descent_indirect_solve(Sigma, A, b, max_iter, reg, indirect_solve_PS)
-    end = time.time()
-    rsdi_time = end - start
-
-    def report(name, costs, feas, time):
-        nsub = (costs[-1, 0] - opt_cost) / opt_cost
-        print(f"{name:<26} final cost = {costs[-1, 0]:.8g}  "
-              f"norm. subopt = {nsub:.3g}  feas = {feas[-1, 0]:.3g}  time = {time:.3f}")
-
-    report("unsketched ADMM", un_costs, un_feas, un_time)
-    # report("sketched ADMM (broken)", br_costs, br_feas)
-    report("sketched descent (RSD, direct solve)", rsd_costs, rsd_feas, rsd_time)
-    report("sketched descent (RSD, indirect solve)", rsdi_costs, rsdi_feas, rsdi_time)
-
-    # ----------------------------------------------------------------
-    # Plots: normalized suboptimality (-> 0) and feasibility.
-    # ----------------------------------------------------------------
-    os.makedirs("figures", exist_ok=True)
-    it = np.arange(max_iter)
-
-    series = [
-        (f"unsketched admm  {un_time:.3g}s", un_costs, un_feas),
-        (f"sketched descent (RSD, direct solve {rsd_time:.3g}s)", rsd_costs, rsd_feas),
-        (f"sketched descent (RSD, indirect solve {rsdi_time:.3g}s)", rsdi_costs, rsdi_feas)
-    ]
-
-    fig, ax = plt.subplots()
-    for label, costs, _ in series:
-        # Normalized suboptimality: (f - f*) / f*  ->  0 as the method converges.
-        nsub = np.abs(costs - opt_cost) / opt_cost
-        ax.semilogy(it, nsub, label=label)
-    ax.set_xlabel("Iteration, $k$")
-    ax.set_ylabel(r"Normalized suboptimality $(f_k - f^\star)/f^\star$")
-    ax.set_title("Normalized suboptimality")
-    ax.legend()
-    ax.grid(True, alpha=0.3)
-    fig.savefig("figures/suboptimality_log_indirect_both.pdf", bbox_inches="tight")
-    plt.close(fig)
-
-    fig, ax = plt.subplots()
-    for label, _, feas in series:
-        ax.semilogy(it, np.maximum(feas, 1e-18), label=label)
-    ax.set_xlabel("Iteration, $k$")
-    ax.set_ylabel(r"Feasibility $\|A x_k - b\|$")
-    ax.set_title("Feasibility")
-    ax.legend()
-    ax.grid(True, alpha=0.3)
-    fig.savefig("figures/feasibility_log_indirect_both.pdf", bbox_inches="tight")
-    plt.close(fig)
-
-    print("\nwrote figures/suboptimality_log_indirect.pdf, figures/feasibility_log_indirect.pdf")
-
-
-if __name__ == "__main__":
-    main()
