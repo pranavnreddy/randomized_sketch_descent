@@ -25,10 +25,11 @@ from kaczmarz_admm import (
 )
 
 def main():
-    A, Sigma, b = make_problem(n=100, m=20)
-    max_iter = 400
-    rho = 1.0
-    eps = 1e-5
+    A, Sigma, b = make_problem(n=1000, m=200)
+
+    max_iter = 10000000000
+    rho = 1
+    eps = 1e-8
 
     start = time.time()
     kacz_costs, kacz_feas, _ = kaczmarz_admm(Sigma, A, b, max_iter, rho, eps)
@@ -49,25 +50,25 @@ def main():
     print(f"cvxpy optimal cost = {opt_cost:.8g}\n")
 
     def report(name, costs, feas, time):
-        nsub = (costs[-1, 0] - opt_cost) / opt_cost
-        print(f"{name:<26} final cost = {costs[-1, 0]:.8g}  "
-              f"norm. subopt = {nsub:.3g}  feas = {feas[-1, 0]:.3g}  time = {time:.3f}")
+        nsub = (costs[-1] - opt_cost) / opt_cost
+        print(f"{name:<26} final cost = {costs[-1]:.8g}  "
+              f"norm. subopt = {nsub:.3g}  feas = {feas[-1]:.3g}  time = {time:.3f}")
 
     report("ADMM w/ direct solve", un_costs, un_feas, un_time)
     # report("sketched ADMM (broken)", br_costs, br_feas)
     report("row sketched indirect solve", kacz_costs, kacz_feas, kacz_time)
-    report("column sketched indirect solve", rcd_costs, rcd_feas, rcd_time)
+    # report("column sketched indirect solve", rcd_costs, rcd_feas, rcd_time)
 
     # ----------------------------------------------------------------
     # Plots: normalized suboptimality (-> 0) and feasibility.
     # ----------------------------------------------------------------
-    plot_label = "admm_with_kaczmarz_and_rcd_comparison"
+    plot_label = "admm_with_kaczmarz_comparison"
     os.makedirs("figures", exist_ok=True)
     it = np.arange(max_iter)
 
     series = [
         (f"admm w/ direct solve ({un_time:.3g}s)", un_costs, un_feas),
-        (f"admm w/ column sketched indirect solve ({rcd_time:.3g}s)", rcd_costs, rcd_feas),
+        # (f"admm w/ column sketched indirect solve ({rcd_time:.3g}s)", rcd_costs, rcd_feas),
         (f"admm w/ row sketched indirect solve ({kacz_time:.3g}s)", kacz_costs, kacz_feas)
     ]
 
