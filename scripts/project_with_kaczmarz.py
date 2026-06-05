@@ -39,6 +39,7 @@ def main():
         # once outside the loop from a stale A, so the KKT-based solves were
         # comparing against a projection from a different problem).
         big_mat = np.block([[np.eye(n), -A.T], [A, np.zeros((m, m))]])
+        
         start = time.time()
         proj_lam = np.linalg.solve(A @ A.T, b - A @ x0)
         proj_x = x0 + A.T @ proj_lam

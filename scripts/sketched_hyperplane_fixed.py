@@ -41,7 +41,7 @@ import math
 def reference_solution(A, Sigma, b):
     """Optimal cost via CVXPY."""
     n = A.shape[1]
-    x = cvx.Variable((n, 1))
+    x = cvx.Variable((n,))
     cost = cvx.quad_form(x, Sigma, assume_PSD=True) / 2
     prob = cvx.Problem(cvx.Minimize(cost), [A @ x == b])
     prob.solve()

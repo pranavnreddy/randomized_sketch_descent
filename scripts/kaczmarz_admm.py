@@ -2,11 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from sketched_hyperplane import (
-    project_onto_hyperplane
-)
-
-def solve_kaczmarz(A, b, tol=1.e-6, max_iter=10000, randomize=False, seed=0):
+def solve_kaczmarz(A, b, tol=1e-8, max_iter=10000, randomize=False, seed=0):
     rng = np.random.default_rng(seed)
     def calc_err(X):
         return np.max(np.abs(A @ X - b))
@@ -41,7 +37,7 @@ def solve_kaczmarz(A, b, tol=1.e-6, max_iter=10000, randomize=False, seed=0):
 
 import numpy as np
 
-def randomized_kaczmarz(A, b, tol=1e-8, max_iter=10000, seed=0):
+def randomized_kaczmarz(A, b, x0=None, tol=1e-8, max_iter=10000, seed=0):
     """
     Solve Ax = b using the Randomized Kaczmarz method.
 
@@ -67,7 +63,6 @@ def randomized_kaczmarz(A, b, tol=1e-8, max_iter=10000, seed=0):
     history : list
         Residual norm history
     """
-
     rng = np.random.default_rng(seed)
 
     A = np.asarray(A, dtype=float)
@@ -75,8 +70,11 @@ def randomized_kaczmarz(A, b, tol=1e-8, max_iter=10000, seed=0):
 
     m, n = A.shape
 
-    x = np.zeros(n)
-    
+    if x0 is None:
+        x = np.zeros(n)
+    else:
+        x = x0
+
     # Row selection probabilities
     row_norms_sq = np.sum(A**2, axis=1)
 
@@ -97,16 +95,15 @@ def randomized_kaczmarz(A, b, tol=1e-8, max_iter=10000, seed=0):
         x = x + (residual / row_norms_sq[i]) * a_i
 
         # Track residual norm occasionally
-        if k % 10 == 0:
+        if k % n == 0:
             full_residual = np.linalg.norm(A @ x - b) / np.linalg.norm(b)
             if full_residual < tol:
-                print(f"Kaczmarz method reached convergence at iteration {k}")
                 break
     return x
 
 import numpy as np
 
-def randomized_coordinate_descent(A, b, tol=1e-8, max_iter=10000, seed=0):
+def randomized_coordinate_descent(A, b, x0=None, tol=1e-8, max_iter=10000, seed=0):
     """
     Randomized coordinate descent for least squares:
 
@@ -132,8 +129,10 @@ def randomized_coordinate_descent(A, b, tol=1e-8, max_iter=10000, seed=0):
     # Accept either a 1-D (m,) or column (m, 1) right-hand side.
     b = np.asarray(b, dtype=float).reshape(-1)
 
-    # Initialize
-    x = np.zeros(n)
+    if x0 is None:
+        x = np.zeros(n)
+    else:
+        x = x0
 
     # Residual r = Ax - b
     r = -b.copy()
@@ -163,36 +162,28 @@ def randomized_coordinate_descent(A, b, tol=1e-8, max_iter=10000, seed=0):
 
         # Convergence test every so often
         if k % n == 0:
-            grad_inf = np.max(np.abs(A.T @ r))
-
-            if grad_inf < tol:
+            full_residual = np.linalg.norm(A @ x - b) / np.linalg.norm(b)
+            if full_residual < tol:
                 break
 
     return x
 
 def kaczmarz_admm(Sigma, A, b, max_iter, rho, eps, seed=0, max_inner_solve_iter=10000):
     n, m = A.shape[1], A.shape[0]
-    costs = np.zeros((max_iter, 1))
-    feas = np.zeros((max_iter, 1))
-    admm_res = np.zeros((max_iter, 1))
-    # kaczmarz_res = np.zeros((max_iter, 1))
+    costs = np.zeros((max_iter,))
+    feas = np.zeros((max_iter,))
+    admm_res = np.zeros((max_iter,))
 
-    x = np.zeros((n, 1))
-    y = np.zeros((n, 1))
-    u = np.zeros((n, 1))
+    x = np.zeros((n,))
+    y = np.zeros((n,))
+    nu = np.zeros((m,))
+    u = np.zeros((n,))
     AAT = A @ A.T
 
     for i in range(max_iter):
         x = np.linalg.solve(rho * Sigma + np.eye(n), y - u)
-
-        # big_mat = np.block([[np.eye(n), -A.T], [A, np.zeros((m, m))]])
-        # sol = np.linalg.solve(big_mat, np.block([[x + u], [b]]))
-        
-        kacz_lam = randomized_kaczmarz(AAT, b - A @ (x+u), tol=eps, seed=seed, max_iter=max_inner_solve_iter)
-        kacz_lam = kacz_lam[:, np.newaxis]
-        y = x+u + A.T @ kacz_lam
-
-        # print(y.shape)
+        nu = randomized_kaczmarz(AAT, b - A @ (x+u), x0=nu, tol=eps, seed=seed, max_iter=int(10 * np.log(i + 10)))
+        y = x+u + A.T @ nu
         u = x - y + u
 
         costs[i] = x.T @ Sigma @ x / 2
@@ -202,27 +193,20 @@ def kaczmarz_admm(Sigma, A, b, max_iter, rho, eps, seed=0, max_inner_solve_iter=
 
 def rcd_admm(Sigma, A, b, max_iter, rho, eps, seed=0, max_inner_solve_iter=10000):
     n, m = A.shape[1], A.shape[0]
-    costs = np.zeros((max_iter, 1))
-    feas = np.zeros((max_iter, 1))
-    admm_res = np.zeros((max_iter, 1))
+    costs = np.zeros((max_iter,))
+    feas = np.zeros((max_iter,))
+    admm_res = np.zeros((max_iter,))
 
-    x = np.zeros((n, 1))
-    y = np.zeros((n, 1))
-    u = np.zeros((n, 1))
+    x = np.zeros((n,))
+    y = np.zeros((n,))
+    u = np.zeros((n,))
+    lam = np.zeros((m,))
     AAT = A @ A.T
 
     for i in range(max_iter):
         x = np.linalg.solve(rho * Sigma + np.eye(n), y - u)
-
-        # big_mat = np.block([[np.eye(n), -A.T], [A, np.zeros((m, m))]])
-        # sol = np.linalg.solve(big_mat, np.block([[x + u], [b]]))
-        
-        kacz_lam = randomized_coordinate_descent(AAT, b - A @ (x+u), tol=eps, seed=seed, max_iter=max_inner_solve_iter)
-        kacz_lam = kacz_lam[:, np.newaxis]
-        y = x+u + A.T @ kacz_lam
-
-        # print(y.shape)
-
+        lam = randomized_coordinate_descent(AAT, b - A @ (x+u), x0=lam, tol=eps, seed=seed, max_iter=max_inner_solve_iter)
+        y = x+u + A.T @ lam
         u = x - y + u
 
         costs[i] = x.T @ Sigma @ x / 2

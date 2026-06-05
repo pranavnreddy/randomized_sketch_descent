@@ -40,7 +40,7 @@ def make_problem(seed: int = SEED, n: int = N, m: int = M):
     A = rng.standard_normal(size=(m, n))
     Sigma = rng.standard_normal(size=(n, n)) / np.sqrt(n)
     Sigma = Sigma.T @ Sigma + np.eye(n)
-    b = rng.standard_normal(size=(m, 1))
+    b = rng.standard_normal(size=(m,))
     return A, Sigma, b
 
 
@@ -48,12 +48,9 @@ def make_problem(seed: int = SEED, n: int = N, m: int = M):
 # Projections
 # --------------------------------------------------------------------------
 def project_onto_hyperplane(A, x, b):
-    """Euclidean projection of x onto {y : A y = b} via the KKT system."""
-    n = np.shape(x)[0]
-    m = np.shape(A)[0]
-    big_mat = np.block([[np.eye(n), -A.T], [A, np.zeros((m, m))]])
-    sol = np.linalg.solve(big_mat, np.block([[x], [b]]))
-    return sol[0:n]
+    """Euclidean projection of x onto {y : A y = b} via the minimum-norm solution."""
+    sol = x + np.linalg.lstsq(A, b - A @ x, rcond=None)[0]
+    return sol
 
 
 def project_onto_sketched_hyperplane(A, x, b, sketch_size, rng=None):
@@ -76,13 +73,13 @@ def project_onto_sketched_hyperplane(A, x, b, sketch_size, rng=None):
 # --------------------------------------------------------------------------
 def unsketched_admm(Sigma, A, b, max_iter, rho):
     n = np.shape(A)[1]
-    costs = np.zeros((max_iter, 1))
-    feas = np.zeros((max_iter, 1))
-    admm_res = np.zeros((max_iter, 1))
+    costs = np.zeros((max_iter,))
+    feas = np.zeros((max_iter,))
+    admm_res = np.zeros((max_iter,))
 
-    x = np.zeros((n, 1))
-    y = np.zeros((n, 1))
-    u = np.zeros((n, 1))
+    x = np.zeros((n,))
+    y = np.zeros((n,))
+    u = np.zeros((n,))
 
     for i in range(max_iter):
         x = np.linalg.solve(rho * Sigma + np.eye(n), y - u)
@@ -92,6 +89,8 @@ def unsketched_admm(Sigma, A, b, max_iter, rho):
         costs[i] = x.T @ Sigma @ x / 2
         feas[i] = np.linalg.norm(A @ y - b)
         admm_res[i] = np.linalg.norm(x - y)
+        if(admm_res[i] < 10e-9):
+            break
     return costs, feas, admm_res
 
 
@@ -100,13 +99,13 @@ def sketched_admm(Sigma, A, b, max_iter, rho, seed=SEED):
     m = np.shape(A)[0]
     rng = np.random.default_rng(seed)
 
-    costs = np.zeros((max_iter, 1))
-    feas = np.zeros((max_iter, 1))
-    admm_res = np.zeros((max_iter, 1))
+    costs = np.zeros((max_iter,))
+    feas = np.zeros((max_iter,))
+    admm_res = np.zeros((max_iter,))
 
-    x = np.zeros((n, 1))
-    y = np.zeros((n, 1))
-    u = np.zeros((n, 1))
+    x = np.zeros((n,))
+    y = np.zeros((n,))
+    u = np.zeros((n,))
 
     for i in range(max_iter):
         sketch_size = rng.integers(m, n)
