@@ -42,7 +42,7 @@ def main():
         
         start = time.time()
         proj_lam = np.linalg.solve(A @ A.T, b - A @ x0)
-        proj_x = x0 + A.T @ proj_lam
+        proj_y = x0 + A.T @ proj_lam
         end = time.time()
         proj_time += end - start
 
