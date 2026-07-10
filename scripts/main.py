@@ -13,6 +13,7 @@ import matplotlib.pyplot as plt
 from sketched_hyperplane import (
     make_problem,
     unsketched_admm,
+    cg_admm
 )
 
 from sketched_hyperplane_fixed import (
@@ -25,21 +26,28 @@ from kaczmarz_admm import (
 )
 
 def main():
-    A, Sigma, b = make_problem(n=1000, m=200)
+    n = 1000
+    m = 200
+    A, Sigma, b = make_problem(n=n, m=m)
 
-    max_iter = 10000000000
+    max_iter = 10000
     rho = 1
     eps = 1e-8
 
-    start = time.time()
-    kacz_costs, kacz_feas, _ = kaczmarz_admm(Sigma, A, b, max_iter, rho, eps)
-    end = time.time()
-    kacz_time = end - start
+    # start = time.time()
+    # kacz_costs, kacz_feas, _ = kaczmarz_admm(Sigma, A, b, max_iter, rho, eps)
+    # end = time.time()
+    # kacz_time = end - start
+
+    # start = time.time()
+    # rcd_costs, rcd_feas, _ = rcd_admm(Sigma, A, b, max_iter, rho, eps)
+    # end = time.time()
+    # rcd_time = end - start
 
     start = time.time()
-    rcd_costs, rcd_feas, _ = rcd_admm(Sigma, A, b, max_iter, rho, eps)
+    cg_costs, cg_feas, _ = cg_admm(Sigma, A, b, max_iter, rho)
     end = time.time()
-    rcd_time = end - start
+    cg_time = end - start
 
     start = time.time()
     un_costs, un_feas, _ = unsketched_admm(Sigma, A, b, max_iter, rho)
@@ -55,8 +63,9 @@ def main():
               f"norm. subopt = {nsub:.3g}  feas = {feas[-1]:.3g}  time = {time:.3f}")
 
     report("ADMM w/ direct solve", un_costs, un_feas, un_time)
+    report("ADMM w/ conjugate gradient", cg_costs, cg_feas, cg_time)
     # report("sketched ADMM (broken)", br_costs, br_feas)
-    report("row sketched indirect solve", kacz_costs, kacz_feas, kacz_time)
+    # report("row sketched indirect solve", kacz_costs, kacz_feas, kacz_time)
     # report("column sketched indirect solve", rcd_costs, rcd_feas, rcd_time)
 
     # ----------------------------------------------------------------
@@ -68,8 +77,8 @@ def main():
 
     series = [
         (f"admm w/ direct solve ({un_time:.3g}s)", un_costs, un_feas),
-        # (f"admm w/ column sketched indirect solve ({rcd_time:.3g}s)", rcd_costs, rcd_feas),
-        (f"admm w/ row sketched indirect solve ({kacz_time:.3g}s)", kacz_costs, kacz_feas)
+        (f"admm w/ conjugate gradient ({cg_time:.3g}s)", cg_costs, cg_feas),
+        # (f"admm w/ row sketched indirect solve ({kacz_time:.3g}s)", kacz_costs, kacz_feas)
     ]
 
     fig, ax = plt.subplots()

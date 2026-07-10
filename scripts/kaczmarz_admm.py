@@ -15,7 +15,6 @@ def solve_kaczmarz(A, b, tol=1e-8, max_iter=10000, randomize=False, seed=0):
         p = (np.linalg.norm(A, axis=1) / np.linalg.norm(A))**2
     else:
         p = range(m)
-    print(p)
     while(k < max_iter):
         if randomize:
             i = rng.choice(range(m), p=p)
@@ -96,7 +95,7 @@ def randomized_kaczmarz(A, b, x0=None, tol=1e-8, max_iter=10000, seed=0):
 
         # Track residual norm occasionally
         if k % n == 0:
-            full_residual = np.linalg.norm(A @ x - b) / np.linalg.norm(b)
+            full_residual = np.linalg.norm(A @ x - b)
             if full_residual < tol:
                 break
     return x
@@ -133,7 +132,6 @@ def randomized_coordinate_descent(A, b, x0=None, tol=1e-8, max_iter=10000, seed=
         x = np.zeros(n)
     else:
         x = x0
-
     # Residual r = Ax - b
     r = -b.copy()
 
@@ -162,13 +160,13 @@ def randomized_coordinate_descent(A, b, x0=None, tol=1e-8, max_iter=10000, seed=
 
         # Convergence test every so often
         if k % n == 0:
-            full_residual = np.linalg.norm(A @ x - b) / np.linalg.norm(b)
+            full_residual = np.linalg.norm(A @ x - b)
             if full_residual < tol:
                 break
 
     return x
 
-def kaczmarz_admm(Sigma, A, b, max_iter, rho, eps, seed=0, max_inner_solve_iter=10000):
+def kaczmarz_admm(Sigma, A, b, max_iter, rho, eps, seed=0, max_inner_solve_iter=10):
     n, m = A.shape[1], A.shape[0]
     costs = np.zeros((max_iter,))
     feas = np.zeros((max_iter,))
@@ -182,7 +180,7 @@ def kaczmarz_admm(Sigma, A, b, max_iter, rho, eps, seed=0, max_inner_solve_iter=
 
     for i in range(max_iter):
         x = np.linalg.solve(rho * Sigma + np.eye(n), y - u)
-        nu = randomized_kaczmarz(AAT, b - A @ (x+u), x0=nu, tol=eps, seed=seed, max_iter=int(10 * np.log(i + 10)))
+        nu = randomized_kaczmarz(AAT, b - A @ (x+u), x0=nu, tol=eps, seed=seed, max_iter=max_inner_solve_iter)
         y = x+u + A.T @ nu
         u = x - y + u
 

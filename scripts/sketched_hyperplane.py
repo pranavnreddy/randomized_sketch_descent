@@ -23,6 +23,7 @@ import os
 import numpy as np
 import cvxpy as cvx
 import matplotlib
+import scipy as sp
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -84,7 +85,7 @@ def unsketched_admm(Sigma, A, b, max_iter, rho):
     for i in range(max_iter):
         x = np.linalg.solve(rho * Sigma + np.eye(n), y - u)
         y = project_onto_hyperplane(A, x + u, b)
-        u = x - y + u
+        u += x - y
 
         costs[i] = x.T @ Sigma @ x / 2
         feas[i] = np.linalg.norm(A @ y - b)
@@ -93,6 +94,32 @@ def unsketched_admm(Sigma, A, b, max_iter, rho):
             break
     return costs, feas, admm_res
 
+def cg_admm(Sigma, A, b, max_iter, rho):
+    m, n = np.shape(A)
+
+    costs = np.zeros((max_iter,))
+    feas = np.zeros((max_iter,))
+    admm_res = np.zeros((max_iter,))
+
+    x = np.zeros((n,))
+    y = np.zeros((n,))
+    u = np.zeros((n,))
+
+    lam = np.zeros((m,))
+    AAT = A @ A.T
+
+    for i in range(max_iter):
+        x = np.linalg.solve(rho * Sigma + np.eye(n), y - u)
+        lam = sp.sparse.linalg.cg(AAT, b - A @ (x+u), x0=lam)[0]
+        y = x+u + A.T @ lam
+        u = x - y + u
+
+        costs[i] = x.T @ Sigma @ x / 2
+        feas[i] = np.linalg.norm(A @ y - b)
+        admm_res[i] = np.linalg.norm(x - y)
+        if(admm_res[i] < 10e-9):
+            break
+    return costs, feas, admm_res
 
 def sketched_admm(Sigma, A, b, max_iter, rho, seed=SEED):
     n = np.shape(A)[1]
