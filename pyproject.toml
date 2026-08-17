@@ -7,10 +7,14 @@ requires-python = ">=3.11"
 dependencies = [
     "numpy>=1.26",
     "scipy>=1.11",
-    "cvxpy>=1.5",
     "matplotlib>=3.8",
+]
+
+[project.optional-dependencies]
+notebooks = [
+    "cvxpy>=1.5",
     "ipykernel>=6.29",
-    "jupyter>=1.0",
+    "jupyterlab>=4.0",
 ]
 
 [tool.uv]

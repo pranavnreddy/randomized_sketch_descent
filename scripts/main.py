@@ -2,52 +2,32 @@
 from __future__ import annotations
 
 import os
-
-import numpy as np
-import matplotlib
 import time
+
+import matplotlib
+import numpy as np
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 from sketched_hyperplane import (
+    cg_admm_relative_accuracy,
     make_problem,
     unsketched_admm,
-    cg_admm
 )
-
-from sketched_hyperplane_fixed import (
-    reference_solution,
-)
-
-from kaczmarz_admm import (
-    kaczmarz_admm,
-    rcd_admm
-)
+from sketched_hyperplane_fixed import reference_solution
 
 def main():
     n = 1000
     m = 200
     A, Sigma, b = make_problem(n=n, m=m)
 
-    max_iter = 10000
-    rho = 1
-    eps = 1e-8
-
-    # start = time.time()
-    # kacz_costs, kacz_feas, _ = kaczmarz_admm(Sigma, A, b, max_iter, rho, eps)
-    # end = time.time()
-    # kacz_time = end - start
-
-    # start = time.time()
-    # rcd_costs, rcd_feas, _ = rcd_admm(Sigma, A, b, max_iter, rho, eps)
-    # end = time.time()
-    # rcd_time = end - start
-
+    max_iter = 1000
+    rho = 0.01
     start = time.time()
-    cg_costs, cg_feas, _ = cg_admm(Sigma, A, b, max_iter, rho)
+    cg_rel_costs, cg_rel_feas, _ = cg_admm_relative_accuracy(Sigma, A, b, max_iter, rho)
     end = time.time()
-    cg_time = end - start
+    cg_rel_time = end - start
 
     start = time.time()
     un_costs, un_feas, _ = unsketched_admm(Sigma, A, b, max_iter, rho)
@@ -55,7 +35,7 @@ def main():
     un_time = end - start
 
     opt_cost = reference_solution(A, Sigma, b)
-    print(f"cvxpy optimal cost = {opt_cost:.8g}\n")
+    print(f"optimal cost = {opt_cost:.8g}\n")
 
     def report(name, costs, feas, time):
         nsub = (costs[-1] - opt_cost) / opt_cost
@@ -63,29 +43,19 @@ def main():
               f"norm. subopt = {nsub:.3g}  feas = {feas[-1]:.3g}  time = {time:.3f}")
 
     report("ADMM w/ direct solve", un_costs, un_feas, un_time)
-    report("ADMM w/ conjugate gradient", cg_costs, cg_feas, cg_time)
-    # report("sketched ADMM (broken)", br_costs, br_feas)
-    # report("row sketched indirect solve", kacz_costs, kacz_feas, kacz_time)
-    # report("column sketched indirect solve", rcd_costs, rcd_feas, rcd_time)
-
-    # ----------------------------------------------------------------
-    # Plots: normalized suboptimality (-> 0) and feasibility.
-    # ----------------------------------------------------------------
-    plot_label = "admm_with_kaczmarz_comparison"
+    report("ADMM w/ conjugate gradient", cg_rel_costs, cg_rel_feas, cg_rel_time)
+    plot_label = "admm_with_cg_and_relative_accuracy_comparison"
     os.makedirs("figures", exist_ok=True)
-    it = np.arange(max_iter)
-
     series = [
         (f"admm w/ direct solve ({un_time:.3g}s)", un_costs, un_feas),
-        (f"admm w/ conjugate gradient ({cg_time:.3g}s)", cg_costs, cg_feas),
-        # (f"admm w/ row sketched indirect solve ({kacz_time:.3g}s)", kacz_costs, kacz_feas)
+        (f"admm w/ conjugate gradient & relative accuracy ({cg_rel_time:.3g}s)",
+         cg_rel_costs, cg_rel_feas),
     ]
 
     fig, ax = plt.subplots()
     for label, costs, _ in series:
-        # Normalized suboptimality: (f - f*) / f*  ->  0 as the method converges.
         nsub = np.abs(costs - opt_cost) / opt_cost
-        ax.semilogy(it, nsub, label=label)
+        ax.semilogy(np.arange(len(costs)), nsub, label=label)
     ax.set_xlabel("Iteration, $k$")
     ax.set_ylabel(r"Normalized suboptimality $(f_k - f^\star)/f^\star$")
     ax.set_title("Normalized suboptimality")
@@ -96,7 +66,7 @@ def main():
 
     fig, ax = plt.subplots()
     for label, _, feas in series:
-        ax.semilogy(it, np.maximum(feas, 1e-18), label=label)
+        ax.semilogy(np.arange(len(feas)), np.maximum(feas, 1e-18), label=label)
     ax.set_xlabel("Iteration, $k$")
     ax.set_ylabel(r"Feasibility $\|A x_k - b\|$")
     ax.set_title("Feasibility")

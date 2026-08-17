@@ -20,7 +20,6 @@ the consequences with four small experiments:
 from __future__ import annotations
 
 import numpy as np
-import cvxpy as cvx
 
 from sketched_hyperplane import (
     make_problem,
@@ -30,12 +29,10 @@ from sketched_hyperplane import (
 
 
 def reference_solution(A, Sigma, b):
-    n = A.shape[1]
-    x = cvx.Variable((n, 1))
-    cost = cvx.quad_form(x, Sigma, assume_PSD=True) / 2
-    prob = cvx.Problem(cvx.Minimize(cost), [A @ x == b])
-    prob.solve()
-    return np.asarray(x.value), float(np.asarray(cost.value).item())
+    m, n = A.shape
+    kkt = np.block([[Sigma, A.T], [A, np.zeros((m, m))]])
+    x = np.linalg.solve(kkt, np.concatenate((np.zeros(n), b)))[:n, None]
+    return x, float((x.T @ Sigma @ x / 2).item())
 
 
 def exp_A_feasibility_of_y(A, Sigma, b, max_iter=300, rho=1.0):

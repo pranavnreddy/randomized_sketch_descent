@@ -35,17 +35,15 @@ and writes normalized-suboptimality / feasibility plots (PDF) to figures/.
 from __future__ import annotations
 
 import numpy as np
-import cvxpy as cvx
 import math
 
 def reference_solution(A, Sigma, b):
-    """Optimal cost via CVXPY."""
+    """Optimal cost from the equality-constrained QP's KKT system."""
     n = A.shape[1]
-    x = cvx.Variable((n,))
-    cost = cvx.quad_form(x, Sigma, assume_PSD=True) / 2
-    prob = cvx.Problem(cvx.Minimize(cost), [A @ x == b])
-    prob.solve()
-    return float(np.asarray(cost.value).item())
+    m = A.shape[0]
+    kkt = np.block([[Sigma, A.T], [A, np.zeros((m, m))]])
+    x = np.linalg.solve(kkt, np.concatenate((np.zeros(n), b)))[:n]
+    return float(x @ Sigma @ x / 2)
 
 
 def feasible_start(A, b):

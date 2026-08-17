@@ -9,8 +9,10 @@ equality-constrained quadratic programs and related linear-system solvers
 ```
 notebooks/   Jupyter notebooks (the original experiments)
 scripts/     Standalone, reproducible Python scripts
+section5/    Preconditioned primal-dual DRS and parameter studies
 matlab/      MATLAB prototypes (Kaczmarz, sketch descent, Markowitz)
 figures/     Generated plots (git-ignored)
+tests/       Consolidated numerical regression tests
 ```
 
 ## Python environment
@@ -19,8 +21,14 @@ Dependencies are listed in `pyproject.toml`. Create the environment with
 [`uv`](https://docs.astral.sh/uv/):
 
 ```bash
-uv venv --python 3.13
-uv pip install -r pyproject.toml
+uv sync
+```
+
+The core scripts need only NumPy, SciPy, and Matplotlib. To run the original
+notebooks, install the optional notebook environment instead:
+
+```bash
+uv sync --extra notebooks
 ```
 
 Run the notebooks with `uv run jupyter lab`, or run the scripts directly:
@@ -29,9 +37,22 @@ Run the notebooks with `uv run jupyter lab`, or run the scripts directly:
 .venv/bin/python scripts/sketched_hyperplane.py        # reproduce the notebook
 .venv/bin/python scripts/diagnose_sketched_admm.py     # why the sketched variant fails
 .venv/bin/python scripts/sketched_hyperplane_fixed.py  # a correctly-sketched solver
+.venv/bin/python -m section5.run_experiments standard  # Section 5 LP/QP sweeps
+.venv/bin/python -m section5.run_experiments lp        # n=500 LP tuning
+.venv/bin/python -m section5.run_experiments inequality-qp
+.venv/bin/python -m unittest discover -s tests -v      # regression tests
 ```
 
 Plots are written to `figures/` as PDF.
+
+## Section 5
+
+[`section5/`](section5/) contains the preconditioned primal-dual
+Douglas--Rachford method, two linear-system solvers, the LP/QP parameter
+sweeps, and the data-aware large-LP tuning study. See
+[`section5/README.md`](section5/README.md) for the equations and run commands.
+Its inexact relaxed solves enforce the strict admissibility rule
+`sigma < (2 - theta) / 2` in both fixed and adaptive runs.
 
 ## Scripts
 

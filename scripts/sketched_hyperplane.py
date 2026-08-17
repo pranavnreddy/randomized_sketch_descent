@@ -21,9 +21,8 @@ from __future__ import annotations
 import os
 
 import numpy as np
-import cvxpy as cvx
 import matplotlib
-import scipy as sp
+from scipy.sparse.linalg import cg
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -90,11 +89,11 @@ def unsketched_admm(Sigma, A, b, max_iter, rho):
         costs[i] = x.T @ Sigma @ x / 2
         feas[i] = np.linalg.norm(A @ y - b)
         admm_res[i] = np.linalg.norm(x - y)
-        if(admm_res[i] < 10e-9):
+        if admm_res[i] < 1e-8 and feas[i] < 1e-8:
             break
-    return costs, feas, admm_res
+    return costs[:i + 1], feas[:i + 1], admm_res[:i + 1]
 
-def cg_admm(Sigma, A, b, max_iter, rho):
+def _cg_admm(Sigma, A, b, max_iter, rho, relative_accuracy=None):
     m, n = np.shape(A)
 
     costs = np.zeros((max_iter,))
@@ -110,16 +109,25 @@ def cg_admm(Sigma, A, b, max_iter, rho):
 
     for i in range(max_iter):
         x = np.linalg.solve(rho * Sigma + np.eye(n), y - u)
-        lam = sp.sparse.linalg.cg(AAT, b - A @ (x+u), x0=lam)[0]
+        atol = 0.0 if relative_accuracy is None else relative_accuracy * np.linalg.norm(x - y)
+        lam = cg(AAT, b - A @ (x + u), x0=lam, atol=atol)[0]
         y = x+u + A.T @ lam
         u = x - y + u
 
         costs[i] = x.T @ Sigma @ x / 2
         feas[i] = np.linalg.norm(A @ y - b)
         admm_res[i] = np.linalg.norm(x - y)
-        if(admm_res[i] < 10e-9):
+        if admm_res[i] < 1e-8 and feas[i] < 1e-8:
             break
-    return costs, feas, admm_res
+    return costs[:i + 1], feas[:i + 1], admm_res[:i + 1]
+
+
+def cg_admm(Sigma, A, b, max_iter, rho):
+    return _cg_admm(Sigma, A, b, max_iter, rho)
+
+
+def cg_admm_relative_accuracy(Sigma, A, b, max_iter, rho, theta=0.7):
+    return _cg_admm(Sigma, A, b, max_iter, rho, relative_accuracy=theta)
 
 def sketched_admm(Sigma, A, b, max_iter, rho, seed=SEED):
     n = np.shape(A)[1]
@@ -161,31 +169,25 @@ def main():
 
     costs, feas, admm_res = unsketched_admm(Sigma, A, b, max_iter, rho)
     print("\nunsketched ADMM (final):")
-    print(f"  cost = {costs[-1, 0]:.6g}")
-    print(f"  feas = {feas[-1, 0]:.6g}")
-    print(f"  res  = {admm_res[-1, 0]:.6g}")
+    print(f"  cost = {costs[-1]:.6g}")
+    print(f"  feas = {feas[-1]:.6g}")
+    print(f"  res  = {admm_res[-1]:.6g}")
 
     s_costs, s_feas, s_res = sketched_admm(Sigma, A, b, max_iter, rho)
     print("\nsketched ADMM (final):")
-    print(f"  cost = {s_costs[-1, 0]:.6g}")
-    print(f"  feas = {s_feas[-1, 0]:.6g}")
-    print(f"  res  = {s_res[-1, 0]:.6g}")
+    print(f"  cost = {s_costs[-1]:.6g}")
+    print(f"  feas = {s_feas[-1]:.6g}")
+    print(f"  res  = {s_res[-1]:.6g}")
 
-    # Reference optimum via CVXPY.
-    x = cvx.Variable((n, 1))
-    cost = cvx.quad_form(x, Sigma, assume_PSD=True) / 2
-    prob = cvx.Problem(cvx.Minimize(cost), [A @ x == b])
-    prob.solve()
-    opt_cost = float(np.asarray(cost.value).item())
-    print(f"\ncvxpy optimal cost = {opt_cost:.6g}")
+    kkt = np.block([[Sigma, A.T], [A, np.zeros((A.shape[0], A.shape[0]))]])
+    x_opt = np.linalg.solve(kkt, np.concatenate((np.zeros(n), b)))[:n]
+    opt_cost = float(x_opt @ Sigma @ x_opt / 2)
+    print(f"\noptimal cost = {opt_cost:.6g}")
 
-    # Normalized suboptimality: (f - f*) / f*  ->  0 as the method converges.
     sub = (costs - opt_cost) / opt_cost
     s_sub = (s_costs - opt_cost) / opt_cost
 
     os.makedirs("figures", exist_ok=True)
-    it = np.arange(max_iter)
-
     for name, series_u, series_s, ylabel in [
         ("suboptimality", sub, s_sub,
          r"Normalized suboptimality $(f_k - f^\star)/f^\star$"),
@@ -193,8 +195,8 @@ def main():
         ("admm_residual", admm_res, s_res, r"ADMM residual $\|x_k - y_k\|$"),
     ]:
         fig, ax = plt.subplots()
-        ax.semilogy(it, np.abs(series_u), label="unsketched admm")
-        ax.semilogy(it, np.abs(series_s), label="sketched admm")
+        ax.semilogy(np.arange(len(series_u)), np.abs(series_u), label="unsketched admm")
+        ax.semilogy(np.arange(len(series_s)), np.abs(series_s), label="sketched admm")
         ax.set_xlabel("Iteration, $k$")
         ax.set_ylabel(ylabel)
         ax.set_title(ylabel.split("$")[0].strip())
