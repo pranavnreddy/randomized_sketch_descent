@@ -18,13 +18,14 @@ relaxed relative-error test in Theorem 5,
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Callable
+from typing import Callable, NamedTuple
 
 import numpy as np
-from numpy.typing import ArrayLike, NDArray
+from numpy.typing import ArrayLike
+
+from ._linear_solvers import Vector, coupled_gmres, schur_cg
 
 
-Vector = NDArray[np.float64]
 Prox = Callable[[Vector, float], ArrayLike]
 
 
@@ -44,6 +45,16 @@ class DRSResult:
     primal_iterates: NDArray[np.float64]
     sigma_history: Vector
     theta_history: Vector
+
+
+class _StepState(NamedTuple):
+    primal: Vector
+    multiplier: Vector
+    candidate: Vector
+    primal_step: Vector
+    dual_step: Vector
+    error_norm: float
+    step_norm: float
 
 
 def _vector(value: ArrayLike, size: int, name: str) -> Vector:
@@ -92,7 +103,7 @@ def primal_dual_drs(
     """Run relaxed, relative-error preconditioned DRS (equations 58--60).
 
     This implementation requires ``0 <= sigma < (2 - theta) / 2`` and
-    ``0 < theta < 2`` are required.  Setting ``sigma=0`` asks for a solve to
+    ``0 < theta < 2``. Setting ``sigma=0`` asks for a solve to
     machine precision.  Inner iteration count zero means that the warm start
     already passed the relative-error test. With ``adaptive=True``, every
     ``adaptation_interval`` outer steps the method adjusts ``theta`` from the
@@ -117,12 +128,18 @@ def primal_dual_drs(
     if adaptation_interval < 2:
         raise ValueError("adaptation_interval must be at least 2")
     default_inner = m if linear_solver == "schur_cg" else m + n
-    inner_limit = default_inner if max_inner_iterations is None else max_inner_iterations
+    inner_limit = (
+        default_inner if max_inner_iterations is None else max_inner_iterations
+    )
     if inner_limit < 1:
         raise ValueError("max_inner_iterations must be positive")
 
     x = np.zeros(n) if x0 is None else _vector(x0, n, "x0")
-    lam = np.zeros(m) if multiplier0 is None else _vector(multiplier0, m, "multiplier0")
+    lam = (
+        np.zeros(m)
+        if multiplier0 is None
+        else _vector(multiplier0, m, "multiplier0")
+    )
     inner_guess = np.zeros(n + m)
     tiny = np.finfo(float).tiny
 
@@ -140,14 +157,15 @@ def primal_dual_drs(
     v = _vector(prox_f(x, gamma_x), n, "prox_f result")
 
     def mnorm(primal: Vector, dual: Vector) -> float:
-        return float(np.sqrt((primal @ primal) / gamma_x + (dual @ dual) / gamma_lambda))
+        squared = (primal @ primal) / gamma_x + (dual @ dual) / gamma_lambda
+        return float(np.sqrt(squared))
 
     def apply_coupled(u: Vector) -> Vector:
         xi, nu = u[:n], u[n:]
         return np.concatenate((xi + gamma_x * matrix.T @ nu,
                                nu - gamma_lambda * matrix @ xi))
 
-    def assess(u: Vector, system_rhs: Vector) -> tuple[bool, tuple]:
+    def assess(u: Vector, system_rhs: Vector) -> tuple[bool, _StepState]:
         xi, nu = u[:n], u[n:]
         reflected_x = xi - gamma_x * matrix.T @ nu
         candidate = _vector(prox_f(reflected_x, gamma_x), n, "prox_f result")
@@ -156,91 +174,81 @@ def primal_dual_drs(
         error = apply_coupled(u) - system_rhs
         error_norm = mnorm(error[:n], error[n:])
         step_norm = mnorm(primal_step, dual_step)
-        floor = 100 * np.finfo(float).eps * max(1.0, mnorm(system_rhs[:n], system_rhs[n:]))
+        floor = 100 * np.finfo(float).eps * max(
+            1.0, mnorm(system_rhs[:n], system_rhs[n:])
+        )
         accepted = error_norm <= max(sigma * step_norm, floor)
-        return accepted, (xi, nu, candidate, primal_step, dual_step, error_norm, step_norm)
+        state = _StepState(
+            xi,
+            nu,
+            candidate,
+            primal_step,
+            dual_step,
+            error_norm,
+            step_norm,
+        )
+        return accepted, state
 
     for _ in range(max_iterations):
         system_rhs = np.concatenate((x, lam - gamma_lambda * rhs_b))
 
+        def assess_current(u: Vector) -> tuple[bool, _StepState]:
+            return assess(u, system_rhs)
+
         if linear_solver == "schur_cg":
-            nu = inner_guess[n:].copy()
             schur_rhs = lam - gamma_lambda * rhs_b + gamma_lambda * matrix @ x
 
             def schur(z: Vector) -> Vector:
                 return z + gamma_x * gamma_lambda * matrix @ (matrix.T @ z)
 
-            r = schur_rhs - schur(nu)
-            direction = r.copy()
-            rr = float(r @ r)
-            accepted = False
-            for inner_count in range(inner_limit + 1):
+            def assemble(nu: Vector) -> Vector:
                 xi = x - gamma_x * matrix.T @ nu
-                u = np.concatenate((xi, nu))
-                accepted, state = assess(u, system_rhs)
-                if accepted or inner_count == inner_limit:
-                    break
-                hd = schur(direction)
-                alpha = rr / float(direction @ hd)
-                nu = nu + alpha * direction
-                r_next = r - alpha * hd
-                rr_next = float(r_next @ r_next)
-                direction = r_next + (rr_next / rr) * direction
-                r, rr = r_next, rr_next
+                return np.concatenate((xi, nu))
+
+            inner = schur_cg(
+                schur,
+                schur_rhs,
+                inner_guess[n:],
+                assemble,
+                assess_current,
+                inner_limit,
+            )
         else:
-            # Unrestarted, warm-started GMRES.  A least-squares candidate is
-            # checked after every Arnoldi vector, so Theorem 5 determines the
-            # inner stopping time rather than SciPy's fixed tolerance.
-            u0 = inner_guess.copy()
-            r0 = system_rhs - apply_coupled(u0)
-            beta = float(np.linalg.norm(r0))
-            accepted, state = assess(u0, system_rhs)
-            inner_count = 0
-            if not accepted and beta > tiny:
-                basis: list[Vector] = [r0 / beta]
-                hessenberg = np.zeros((inner_limit + 1, inner_limit))
-                target = np.zeros(inner_limit + 1)
-                target[0] = beta
-                for j in range(inner_limit):
-                    w = apply_coupled(basis[j])
-                    for i in range(j + 1):
-                        hessenberg[i, j] = basis[i] @ w
-                        w -= hessenberg[i, j] * basis[i]
-                    hessenberg[j + 1, j] = np.linalg.norm(w)
-                    if hessenberg[j + 1, j] > 100 * np.finfo(float).eps:
-                        basis.append(w / hessenberg[j + 1, j])
-                    coeff, *_ = np.linalg.lstsq(
-                        hessenberg[:j + 2, :j + 1], target[:j + 2], rcond=None
-                    )
-                    u = u0 + np.column_stack(basis[:j + 1]) @ coeff
-                    inner_count = j + 1
-                    accepted, state = assess(u, system_rhs)
-                    if accepted or hessenberg[j + 1, j] <= 100 * np.finfo(float).eps:
-                        break
+            inner = coupled_gmres(
+                apply_coupled,
+                system_rhs,
+                inner_guess,
+                assess_current,
+                inner_limit,
+            )
+
+        accepted, state = inner.accepted, inner.state
+        inner_count = inner.iterations
 
         if not accepted:
             raise RuntimeError(
                 f"{linear_solver} failed relative-error test after {inner_limit} steps; "
-                f"residual={state[5]:.3e}, bound={sigma * state[6]:.3e}"
+                f"residual={state.error_norm:.3e}, "
+                f"bound={sigma * state.step_norm:.3e}"
             )
 
-        xi, nu, v, primal_step, dual_step, residual_norm, step_norm = state
-        inner_guess = np.concatenate((xi, nu))
-        x += theta * primal_step
-        lam += theta * dual_step
+        v = state.candidate
+        inner_guess = np.concatenate((state.primal, state.multiplier))
+        x += theta * state.primal_step
+        lam += theta * state.dual_step
 
         feasibility = float(np.linalg.norm(matrix @ v - rhs_b))
         objectives.append(np.nan if objective is None else float(objective(v)))
         feasibilities.append(feasibility)
-        steps.append(step_norm)
-        residuals.append(residual_norm)
-        ratios.append(residual_norm / max(step_norm, tiny))
+        steps.append(state.step_norm)
+        residuals.append(state.error_norm)
+        ratios.append(state.error_norm / max(state.step_norm, tiny))
         inner_counts.append(inner_count)
         primals.append(v.copy())
         sigma_values.append(sigma)
         theta_values.append(theta)
-        progress.append(max(step_norm, feasibility))
-        if theta * step_norm <= tolerance and feasibility <= tolerance:
+        progress.append(max(state.step_norm, feasibility))
+        if theta * state.step_norm <= tolerance and feasibility <= tolerance:
             converged = True
             break
 

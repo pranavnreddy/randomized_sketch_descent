@@ -1,4 +1,4 @@
-"""Inequality-QP study used by :mod:`section5.run_experiments`.
+"""Inequality-QP study used by :mod:`scripts.run_experiments`.
 
 The slack formulation uses the Section 5 variable ``y=(x,s)``, constraint
 matrix ``B=[A I]``, and proximal map
@@ -15,12 +15,17 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 import numpy as np
-from scipy.optimize import LinearConstraint, minimize
 
-from .experiment_utils import plot_runs, write_rows
-import matplotlib.pyplot as plt
+from randomized_sketch_descent import DRSResult, primal_dual_drs
 
-from .primal_dual_drs import DRSResult, primal_dual_drs
+from .experiment_utils import (
+    normalized_objective_error,
+    plot_runs,
+    plt,
+    save_figure,
+    write_rows,
+)
+from .problems import Prox, inequality_qp_optimum, slack_quadratic_prox
 
 
 @dataclass(frozen=True)
@@ -29,6 +34,7 @@ class InequalityQP:
     b: np.ndarray
     Q: np.ndarray
     B: np.ndarray
+    prox: Prox
     optimum: float
     curvature: float
     s_min: float
@@ -57,19 +63,10 @@ def make_problem(n: int, seed: int, constraint_ratio: float = .2) -> InequalityQ
     b = A @ feasible + slack
     B = np.hstack((A, np.eye(m)))
 
-    # scipy's trust-constr reference is independent of the slack DRS method.
-    constraint = LinearConstraint(A, -np.inf, b)
-    reference = minimize(
-        lambda x: float(x @ Q @ x), np.zeros(n),
-        jac=lambda x: 2 * Q @ x, hess=lambda _: 2 * Q,
-        constraints=constraint, method="trust-constr",
-        options={"gtol": 1e-11, "xtol": 1e-12, "maxiter": 2_000},
-    )
-    if not reference.success:
-        raise RuntimeError(reference.message)
     singular_values = np.linalg.svd(B, compute_uv=False)
     return InequalityQP(
-        A=A, b=b, Q=Q, B=B, optimum=float(reference.fun),
+        A=A, b=b, Q=Q, B=B, prox=slack_quadratic_prox(Q),
+        optimum=inequality_qp_optimum(Q, A, b),
         curvature=float(np.trace(2 * Q) / n),
         s_min=float(singular_values[-1]), s_max=float(singular_values[0]),
     )
@@ -84,17 +81,9 @@ def parameters(problem: InequalityQP, setting: Setting) -> tuple[float, float]:
 def solve(problem: InequalityQP, setting: Setting, max_iterations: int,
           tolerance: float) -> DRSResult:
     n = problem.Q.shape[0]
-    eigenvalues, eigenvectors = np.linalg.eigh(problem.Q)
-
-    def prox(y: np.ndarray, gamma: float) -> np.ndarray:
-        x = eigenvectors @ (
-            (eigenvectors.T @ y[:n]) / (1 + 2 * gamma * eigenvalues)
-        )
-        return np.concatenate((x, np.maximum(y[n:], 0.)))
-
     gamma_x, gamma_lambda = parameters(problem, setting)
     return primal_dual_drs(
-        prox, problem.B, problem.b, gamma_x=gamma_x,
+        problem.prox, problem.B, problem.b, gamma_x=gamma_x,
         gamma_lambda=gamma_lambda, sigma=setting.sigma,
         theta=setting.theta, linear_solver="schur_cg",
         adaptive=setting.adaptive,
@@ -108,10 +97,8 @@ def diagnostics(problem: InequalityQP, result: DRSResult) -> tuple[np.ndarray, n
     xs = result.primal_iterates[:, :n]
     violations = np.maximum(xs @ problem.A.T - problem.b, 0.)
     inequality = np.linalg.norm(violations, axis=1)
-    objective_error = np.abs(result.objective_values - problem.optimum) / max(
-        1., abs(problem.optimum)
-    )
-    merit = np.maximum(objective_error + inequality, 1e-16)
+    error = normalized_objective_error(result.objective_values, problem.optimum)
+    merit = np.maximum(error + inequality, 1e-16)
     return merit, inequality
 
 
@@ -160,8 +147,7 @@ def result_row(problem_name: str, stage: str, problem: InequalityQP,
 
 
 def run_study() -> None:
-    output = Path("figures/section5/inequality_qp_tuning")
-    output.mkdir(parents=True, exist_ok=True)
+    output = Path("figures/inequality_qp_tuning")
     proxy = make_problem(100, 311)
     large = make_problem(500, 733)
     pre_runs, parameter_runs, winners = tune(proxy)
@@ -220,6 +206,4 @@ def plot_adaptation(runs, output: Path) -> None:
         axis.grid(True, alpha=.3)
         axis.legend(fontsize=8)
     fig.suptitle("Progress-based adaptive parameters")
-    fig.tight_layout()
-    fig.savefig(output, bbox_inches="tight")
-    plt.close(fig)
+    save_figure(fig, output)

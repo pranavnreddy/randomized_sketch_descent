@@ -1,11 +1,11 @@
-"""Shared output helpers for Section 5 tuning studies."""
+"""Shared plotting and result helpers for the experiment scripts."""
 
 from __future__ import annotations
 
 import csv
 import os
 from pathlib import Path
-from typing import Callable, Iterable
+from typing import Callable, Iterable, Protocol
 
 os.environ.setdefault("MPLCONFIGDIR", "/tmp/randomized-sketch-descent-matplotlib")
 
@@ -15,17 +15,40 @@ import numpy as np
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
+from randomized_sketch_descent import DRSResult
+
+
+class Labeled(Protocol):
+    label: str
+
 
 def write_rows(path: Path, rows: list[dict]) -> None:
+    """Write homogeneous result rows to CSV."""
+    if not rows:
+        raise ValueError("cannot write an empty result table")
+    path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", newline="") as stream:
         writer = csv.DictWriter(stream, fieldnames=list(rows[0]))
         writer.writeheader()
         writer.writerows(rows)
 
 
+def normalized_objective_error(values: np.ndarray, optimum: float) -> np.ndarray:
+    """Return absolute objective error scaled by ``max(1, |optimum|)``."""
+    return np.abs(values - optimum) / max(1.0, abs(optimum))
+
+
+def save_figure(fig, output: Path) -> None:
+    """Lay out, save, and close a Matplotlib figure."""
+    output.parent.mkdir(parents=True, exist_ok=True)
+    fig.tight_layout()
+    fig.savefig(output, bbox_inches="tight")
+    plt.close(fig)
+
+
 def plot_runs(
-    runs: Iterable[tuple[object, object]],
-    merit: Callable[[object], np.ndarray],
+    runs: Iterable[tuple[Labeled, DRSResult]],
+    merit: Callable[[DRSResult], np.ndarray],
     title: str,
     ylabel: str,
     output: Path,
@@ -44,6 +67,4 @@ def plot_runs(
         axis.grid(True, alpha=.3)
         axis.legend(fontsize=7)
     fig.suptitle(title)
-    fig.tight_layout()
-    fig.savefig(output, bbox_inches="tight")
-    plt.close(fig)
+    save_figure(fig, output)

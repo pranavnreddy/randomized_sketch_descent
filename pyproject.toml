@@ -1,21 +1,22 @@
 [project]
 name = "randomized-sketch-descent"
 version = "0.1.0"
-description = "Randomized sketch descent and sketched ADMM experiments"
+description = "Preconditioned primal-dual Douglas--Rachford experiments"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "numpy>=1.26",
+]
+
+[project.optional-dependencies]
+experiments = [
     "scipy>=1.11",
     "matplotlib>=3.8",
 ]
 
-[project.optional-dependencies]
-notebooks = [
-    "cvxpy>=1.5",
-    "ipykernel>=6.29",
-    "jupyterlab>=4.0",
-]
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
 
-[tool.uv]
-package = false
+[tool.setuptools.packages.find]
+where = ["src"]

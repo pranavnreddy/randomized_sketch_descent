@@ -1,4 +1,4 @@
-"""Large-LP study used by :mod:`section5.run_experiments`. 
+"""Large-LP study used by :mod:`scripts.run_experiments`.
 
 The preconditioner is parameterized using problem scales instead of raw
 numbers.  If ``s_min`` and ``s_max`` are the extreme singular values of A,
@@ -18,10 +18,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 import numpy as np
-from scipy.optimize import linprog
 
-from .experiment_utils import plot_runs, write_rows
-from .primal_dual_drs import primal_dual_drs
+from randomized_sketch_descent import DRSResult, primal_dual_drs
+
+from .experiment_utils import normalized_objective_error, plot_runs, write_rows
+from .problems import nonnegative_linear_prox, standard_form_lp_optimum
 
 
 @dataclass(frozen=True)
@@ -55,11 +56,8 @@ def make_lp(n: int, seed: int) -> LP:
     feasible /= feasible.sum()
     b = A @ feasible
     c = rng.standard_normal(n)
-    reference = linprog(c, A_eq=A, b_eq=b, bounds=(0, None), method="highs")
-    if not reference.success:
-        raise RuntimeError(reference.message)
     s = np.linalg.svd(A, compute_uv=False)
-    return LP(A, b, c, float(reference.fun), float(s[-1]), float(s[0]),
+    return LP(A, b, c, standard_form_lp_optimum(c, A, b), float(s[-1]), float(s[0]),
               float(np.linalg.norm(c) / np.sqrt(n)))
 
 
@@ -72,23 +70,24 @@ def data_setting(lp: LP, x_scale: float, product_scale: float,
                    gamma_lambda, sigma, theta)
 
 
-def solve(lp: LP, setting: Setting, max_iterations: int, tolerance: float):
-    prox = lambda z, gamma: np.maximum(z - gamma * lp.c, 0.)
+def solve(
+    lp: LP, setting: Setting, max_iterations: int, tolerance: float
+) -> DRSResult:
     objective = lambda x: float(lp.c @ x)
     return primal_dual_drs(
-        prox, lp.A, lp.b, gamma_x=setting.gamma_x,
+        nonnegative_linear_prox(lp.c), lp.A, lp.b, gamma_x=setting.gamma_x,
         gamma_lambda=setting.gamma_lambda, sigma=setting.sigma,
         theta=setting.theta, linear_solver="schur_cg", objective=objective,
         tolerance=tolerance, max_iterations=max_iterations,
     )
 
 
-def merit(lp: LP, result) -> np.ndarray:
-    objective_error = np.abs(result.objective_values - lp.optimum) / max(1., abs(lp.optimum))
-    return np.maximum(objective_error + result.feasibility_norms, 1e-16)
+def merit(lp: LP, result: DRSResult) -> np.ndarray:
+    error = normalized_objective_error(result.objective_values, lp.optimum)
+    return np.maximum(error + result.feasibility_norms, 1e-16)
 
 
-def score(lp: LP, result) -> tuple[float, int]:
+def score(lp: LP, result: DRSResult) -> tuple[float, int]:
     # Prefer accuracy first; cumulative inner work breaks practically equal
     # ties.  The log score prevents small numerical noise from dominating.
     return (float(np.log10(merit(lp, result)[-1])),
@@ -143,8 +142,7 @@ def row(problem: str, stage: str, lp: LP, setting: Setting, result) -> dict:
 
 
 def run_study() -> None:
-    output = Path("figures/section5/lp_tuning")
-    output.mkdir(parents=True, exist_ok=True)
+    output = Path("figures/lp_tuning")
     proxy = make_lp(150, 101)
     large = make_lp(500, 202)
     pre_runs, parameter_runs, winners = tune(proxy)
